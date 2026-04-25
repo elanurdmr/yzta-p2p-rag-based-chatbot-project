@@ -1,0 +1,18 @@
+/.vscode
+
+# Ortam değişkenleri — asla commit edilmemeli
+.env
+.env.local
+/backend/.env
+/frontend/.env.local
+
+# Sanal ortam ve build çıktıları
+/backend/.venv
+/frontend/.next
+/frontend/node_modules
+
+# ChromaDB ve SQLite veritabanı dosyaları
+/backend/app/resource/
+/backend/resource/chroma_db/
+/backend/resource/database.db
+/resource/
