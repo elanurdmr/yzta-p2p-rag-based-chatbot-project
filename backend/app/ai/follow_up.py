@@ -1,6 +1,6 @@
 """
-Takip sorusu üreteci.
-Verilen AI yanıtına göre 3 adet akıllı takip sorusu üretir.
+app/ai/follow_up.py — Her AI yanıtından sonra 3 takip sorusu üretir.
+Bu ayrı bir LLM çağrısı — hafif model kullanmak maliyeti düşürüyor.
 """
 
 import json
@@ -13,6 +13,8 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# prompt'ta JSON formatı zorlamak önemli çünkü parse etmek zorundayız
+# "başka hiçbir şey yazma" kısmı olmadan model açıklama eklemeye çalışıyor
 _FOLLOW_UP_PROMPT = """Aşağıdaki soru-cevap çiftine göre, kullanıcının dokümana daha derinlemesine dalmasını sağlayacak 3 kısa takip sorusu üret.
 
 Kullanıcı sorusu: {user_question}
@@ -26,11 +28,14 @@ Kurallar:
 
 
 def _parse_questions(text: str) -> list[str]:
-    """Model çıktısından JSON dizi içindeki soruları güvenle çıkarır."""
-    # Markdown code block varsa temizle
+    """Model çıktısından JSON dizi içindeki soruları güvenle çıkarır.
+    Bazen model ```json ... ``` blok içinde dönüyor, bazen düz metin ekliyor.
+    Her iki durumu da handle etmeye çalışıyoruz."""
+
+    # markdown code block temizle
     text = re.sub(r"```[a-z]*\n?", "", text).strip()
 
-    # İlk [ ... ] bloğunu bul (greedy — tüm diziyi yakala)
+    # [ ... ] bloğunu bul — re.DOTALL önemli çünkü multiline JSON olabilir
     match = re.search(r"\[.*\]", text, re.DOTALL)
     if not match:
         return []
@@ -49,16 +54,19 @@ async def generate_follow_up_questions(
     user_question: str,
     ai_answer: str,
 ) -> list[str]:
-    """Yanıt sonrası 3 adet takip sorusu üretir."""
+    """Yanıt sonrası 3 adet takip sorusu üretir.
+    Çok kısa yanıtlar için (30 karakter altı) hiç üretme — genellikle hata mesajıdır."""
     if not ai_answer or len(ai_answer) < 30:
         return []
 
     try:
+        # temperature=0.7 — biraz yaratıcılık istiyoruz, tamamen deterministik olmasın
         llm = ChatGoogleGenerativeAI(
             model=settings.DEFAULT_MODEL,
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=0.7,
         )
+        # uzun yanıtları keserek token tasarrufu yapıyoruz
         prompt = _FOLLOW_UP_PROMPT.format(
             user_question=user_question[:400],
             ai_answer=ai_answer[:1200],
@@ -71,8 +79,10 @@ async def generate_follow_up_questions(
         if questions:
             return questions
 
+        # parse başarısız oldu ama hata da olmadı — sessizce boş dön
         logger.warning("Follow-up: JSON parse başarısız. Ham yanıt: %s", text[:300])
     except Exception as e:
+        # follow-up oluşturulamaması kritik değil — akışı kesmemek için sadece log
         logger.warning("Takip sorusu üretilemedi: %s", e)
 
     return []

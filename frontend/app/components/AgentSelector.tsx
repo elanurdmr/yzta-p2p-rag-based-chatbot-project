@@ -1,3 +1,7 @@
+// app/components/AgentSelector.tsx — header'daki ajan seçim dropdown'ı
+// Sadece doküman odaklı iki ajan var: Q&A ve özetleme.
+// Değer değişince layout.tsx'te selectAgent çağrılıyor ve yeni thread açılıyor.
+
 import React from "react";
 import { Select } from "antd";
 import { FileSearchOutlined, FileTextOutlined } from "@ant-design/icons";
@@ -15,6 +19,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({ value, onChange }) => {
       onChange={onChange}
       options={[
         {
+          // bu key'ler backend'deki agents.py ile eşleşmeli — değiştirirsen orayı da değiştir
           value: "dokuman-asistani",
           label: (
             <span className="flex items-center gap-1.5">

@@ -1,3 +1,6 @@
+# app/utils/chat_utils.py — LangChain mesaj tiplerini API'nin ChatMessage formatına çevirir.
+# LangGraph'ın iç tipleri ile frontend'in beklediği format farklı, burada köprü kuruyoruz.
+
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -10,7 +13,10 @@ from langchain_core.messages import (
 
 from api.schema.chatSchema import ChatMessage
 
+
 def convert_message_content_to_string(content: str | list[str | dict]) -> str:
+    """Mesaj içeriği bazen düz string, bazen content item listesi geliyor.
+    Anthropic modelleri özellikle liste formatını kullanıyor — Gemini için genellikle string geliyor."""
     if isinstance(content, str):
         return content
     text: list[str] = []
@@ -22,8 +28,9 @@ def convert_message_content_to_string(content: str | list[str | dict]) -> str:
             text.append(content_item["text"])
     return "".join(text)
 
+
 def langchain_to_chat_message(message: BaseMessage) -> ChatMessage:
-    """Create a ChatMessage from a LangChain message."""
+    """LangChain BaseMessage'ı frontend'in anlayacağı ChatMessage formatına çevirir."""
     match message:
         case HumanMessage():
             human_message = ChatMessage(
@@ -36,6 +43,7 @@ def langchain_to_chat_message(message: BaseMessage) -> ChatMessage:
                 type="ai",
                 content=convert_message_content_to_string(message.content),
             )
+            # tool_calls varsa bunları da taşıyoruz — frontend araç çağrısı gösterimi için kullanıyor
             if message.tool_calls:
                 ai_message.tool_calls = message.tool_calls
             if message.response_metadata:
@@ -60,13 +68,14 @@ def langchain_to_chat_message(message: BaseMessage) -> ChatMessage:
                 raise ValueError(f"Unsupported chat message role: {message.role}")
         case _:
             raise ValueError(f"Unsupported message type: {message.__class__.__name__}")
-        
+
 
 def remove_tool_calls(content: str | list[str | dict]) -> str | list[str | dict]:
-    """Remove tool calls from content."""
+    """Token stream'inden tool_use içerik öğelerini filtreler.
+    Şu an sadece Anthropic modelleri stream esnasında tool_use gönderiyor.
+    Gemini için genellikle gerekmiyor ama genel tutmak için bıraktık."""
     if isinstance(content, str):
         return content
-    # Currently only Anthropic models stream tool calls, using content item type tool_use.
     return [
         content_item
         for content_item in content

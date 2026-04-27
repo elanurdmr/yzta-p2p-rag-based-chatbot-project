@@ -1,5 +1,7 @@
 """
-Sohbet endpoint'leri — streaming ve tek seferlik yanıt desteği.
+app/api/chat_routes.py — /chat altındaki tüm endpoint'ler burада.
+stream, invoke ve agents olmak üzere üç rota var.
+Asıl iş _message_generator içinde yapılıyor.
 """
 
 import json
@@ -20,7 +22,6 @@ from ai.agent.agents import DEFAULT_AGENT, get_agent
 from ai.follow_up import generate_follow_up_questions
 from api.schema.chatSchema import ChatMessage, StreamInput, UserInput
 from core.config import settings
-from db.conversation_service import upsert_conversation
 from utils.chat_utils import (
     convert_message_content_to_string,
     langchain_to_chat_message,
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 chat_router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+# FastAPI docs için SSE response örneği — sadece swagger'da güzel görünsün diye
 def _sse_response_example() -> dict[int, Any]:
     return {
         status.HTTP_200_OK: {
@@ -53,6 +55,7 @@ async def list_agents():
     return get_all_agent_info()
 
 
+# tek seferlik yanıt — streaming istemeyenler için, test amaçlı da kullanışlı
 @chat_router.post("/invoke")
 async def invoke(user_input: UserInput) -> ChatMessage:
     """Tek seferlik ajan yanıtı."""
@@ -97,6 +100,7 @@ async def _build_input(
     configurable = {"thread_id": thread_id, "model": settings.DEFAULT_MODEL}
 
     if user_input.agent_config:
+        # agent_config'deki anahtarlar bizim ayrılmış alanlarla çakışmamalı
         overlap = configurable.keys() & user_input.agent_config.keys()
         if overlap:
             raise HTTPException(
@@ -107,6 +111,7 @@ async def _build_input(
 
     config = RunnableConfig(configurable=configurable, run_id=run_id)
 
+    # eğer önceki turda bir interrupt varsa resume ile devam et
     state = await agent.aget_state(config=config)
     interrupted = [t for t in state.tasks if hasattr(t, "interrupts") and t.interrupts]
     input_data = Command(resume=user_input.message) if interrupted else {
@@ -120,14 +125,10 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
     agent = get_agent(user_input.agent_id)
     kwargs, run_id = await _build_input(user_input, agent)
 
-    # Conversation'ı SQLite'a kaydet / updated_at güncelle
     thread_id = user_input.thread_id or str(run_id)
-    try:
-        await upsert_conversation(thread_id, user_input.message)
-    except Exception as e:
-        logger.warning("Conversation kaydedilemedi: %s", e)
 
-    # Son AI yanıtını takip et (takip soruları için) — yalnızca updates modundan alınır
+    # takip sorularını üretmek için son AI yanıtını tutuyoruz
+    # çok kısa yanıtlarda follow-up üretmiyoruz zaten
     last_ai_content: str = ""
 
     try:
@@ -160,10 +161,10 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
                     yield f"data: {json.dumps({'type': 'error', 'content': 'Beklenmeyen hata'})}\n\n"
                     continue
 
+                # kullanıcının kendi mesajını tekrar gönderme
                 if chat_message.type == "human" and chat_message.content == user_input.message:
                     continue
 
-                # Son anlamlı AI yanıtını kaydet (takip soruları için)
                 if chat_message.type == "ai" and chat_message.content and not chat_message.tool_calls:
                     last_ai_content = chat_message.content
 
@@ -173,6 +174,7 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
                 if not user_input.stream_tokens:
                     continue
                 msg, metadata = event
+                # bazı node'lar stream_tokens=False gibi davranmak için bu tag'i kullanıyor
                 if "skip_stream" in metadata.get("tags", []):
                     continue
                 if not isinstance(msg, AIMessageChunk):
@@ -182,6 +184,7 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
                     yield f"data: {json.dumps({'type': 'token', 'content': convert_message_content_to_string(content)})}\n\n"
 
     except GeneratorExit:
+        # kullanıcı sayfayı kapattı
         logger.info("Akış istemci tarafından kapatıldı")
         return
     except CancelledError:
@@ -190,13 +193,14 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
     except Exception as e:
         err_str = str(e)
         logger.error(f"Akış hatası: {e}")
+        # 429 özel mesaj göster, diğerleri generic hata
         if "429" in err_str or "quota" in err_str.lower() or "Quota" in err_str:
             msg = "⏳ API kotası doldu. Lütfen 1-2 dakika bekleyip tekrar deneyin."
         else:
             msg = f"Sunucu hatası: {err_str[:200]}"
         yield f"data: {json.dumps({'type': 'error', 'content': msg})}\n\n"
     finally:
-        # Takip sorularını üret ve gönder (sadece anlamlı bir AI yanıtı varsa)
+        # finally'de takip sorularını üret — hata olsa bile end eventi gönderilmeli
         if last_ai_content and len(last_ai_content) > 40:
             try:
                 questions = await generate_follow_up_questions(

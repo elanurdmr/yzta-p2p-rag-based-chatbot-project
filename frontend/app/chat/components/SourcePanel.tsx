@@ -1,5 +1,9 @@
 "use client";
 
+// app/chat/components/SourcePanel.tsx — AI yanıtının altında gösterilen kaynak paneli
+// Her kaynak: dosya adı, sayfa numarası, benzerlik skoru ve önizleme içeriyor.
+// 3'ten fazla kaynak varsa "X kaynak daha" butonu çıkıyor.
+
 import React, { useState } from "react";
 import { Tag, Tooltip } from "antd";
 import {
@@ -23,6 +27,7 @@ function FileIcon({ filename }: { filename: string }) {
   return <FileTextOutlined className="text-gray-400" />;
 }
 
+// renk kodu: yüksek benzerlik = yeşil, orta = mavi, düşük = gri
 function scoreColor(score: number): string {
   if (score >= 0.75) return "success";
   if (score >= 0.5) return "processing";
@@ -34,11 +39,11 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ sources }) => {
 
   if (!sources || sources.length === 0) return null;
 
+  // varsayılan olarak ilk 3 kaynak görünür
   const visible = expanded ? sources : sources.slice(0, 3);
 
   return (
     <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 overflow-hidden">
-      {/* Başlık */}
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 border-b border-gray-200">
         <LinkOutlined className="text-blue-500 text-xs" />
         <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
@@ -46,9 +51,9 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ sources }) => {
         </span>
       </div>
 
-      {/* Kaynak kartları */}
       <div className="divide-y divide-gray-100">
         {visible.map((src) => (
+          // key olarak file+index kombinasyonu — aynı dosyadan birden fazla chunk gelebilir
           <div key={`${src.file}-${src.index}`} className="px-3 py-2 flex items-start gap-2">
             <FileIcon filename={src.file} />
             <div className="flex-1 min-w-0">
@@ -56,14 +61,17 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ sources }) => {
                 <span className="text-xs font-medium text-gray-700 truncate max-w-[180px]">
                   {src.file}
                 </span>
+                {/* sayfa numarası sadece PDF'lerde var */}
                 {src.page !== null && (
                   <span className="text-xs text-gray-400">s.{src.page}</span>
                 )}
+                {/* skoru yüzde olarak göster */}
                 <Tag color={scoreColor(src.score)} className="text-xs leading-none py-0 m-0">
                   %{Math.round(src.score * 100)}
                 </Tag>
               </div>
               {src.preview && (
+                // tam içerik tooltip'te — kart üzerinde sadece kısa önizleme
                 <Tooltip title={src.preview} placement="topLeft">
                   <p className="text-xs text-gray-400 mt-0.5 truncate">{src.preview}</p>
                 </Tooltip>
@@ -73,7 +81,6 @@ const SourcePanel: React.FC<SourcePanelProps> = ({ sources }) => {
         ))}
       </div>
 
-      {/* Daha fazla / az göster */}
       {sources.length > 3 && (
         <button
           onClick={() => setExpanded(!expanded)}

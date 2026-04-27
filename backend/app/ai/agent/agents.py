@@ -1,3 +1,6 @@
+# app/ai/agent/agents.py — ajan kayıt defteri
+# yeni bir ajan eklemek için sadece bu dosyayı düzenlemek yeterli
+
 from dataclasses import dataclass
 
 from langgraph.graph.state import CompiledStateGraph
@@ -7,11 +10,12 @@ from ai.agent.document_agent import document_agent
 from ai.agent.summarizer_agent import summarizer_agent
 
 
+# bilinmeyen agent_id gelirse bu kullanılır
 DEFAULT_AGENT = "dokuman-asistani"
 
 
 class AgentInfo(BaseModel):
-    """Mevcut bir ajan hakkında bilgi."""
+    """GET /chat/agents endpoint'inin döndürdüğü ajan bilgisi."""
 
     key: str = Field(description="Ajan anahtarı.")
     description: str = Field(description="Ajanın açıklaması.")
@@ -23,6 +27,7 @@ class Agent:
     graph: CompiledStateGraph
 
 
+# agent_id → Agent eşlemesi — frontend dropdown ile bu anahtarları kullanıyor
 agents: dict[str, Agent] = {
     "dokuman-asistani": Agent(
         description="Yüklenen dokümanlar üzerinde soru-cevap yapan akıllı asistan.",
@@ -36,7 +41,8 @@ agents: dict[str, Agent] = {
 
 
 def get_agent(agent_id: str) -> CompiledStateGraph:
-    """Ajan kimliğine göre ajan döndürür."""
+    """Verilen ID'ye göre ajan grafiğini döndürür.
+    Geçersiz ID gelirse sessizce default ajana düşüyor — frontend hata almasın diye."""
     if agent_id not in agents:
         agent_id = DEFAULT_AGENT
     return agents[agent_id].graph

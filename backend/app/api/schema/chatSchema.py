@@ -1,3 +1,6 @@
+# app/api/schema/chatSchema.py — sohbet API'sinin Pydantic modelleri
+# UserInput → gelen istek, ChatMessage → giden yanıt, StreamInput → streaming isteği
+
 from pydantic import BaseModel, Field, SerializeAsAny
 from typing import Any, Literal, NotRequired
 from typing_extensions import TypedDict
@@ -5,41 +8,44 @@ from ai.agent.agents import DEFAULT_AGENT
 
 
 class UserInput(BaseModel):
-    """user chat input info"""
+    """Kullanıcıdan gelen sohbet isteği."""
 
     message: str = Field(
         description="input message"
     )
 
+    # thread_id yoksa backend yeni bir UUID üretiyor
+    # aynı thread_id gönderilirse LangGraph bellekten önceki mesajları biliyor
     thread_id: str | None = Field(
         description="Thread ID is used for persistence and continuing multi-round conversations",
         default=None
     )
-    
+
+    # belirtilmezse DEFAULT_AGENT kullanılır
     agent_id: str | None = Field(
         description="a agent id",
         default=DEFAULT_AGENT
     )
-    
+
+    # ajan bazlı özel config geçmek isteyenler için — şimdilik kullanmıyoruz ama ileride işe yarar
     agent_config: dict[str, Any] = Field(
         description="Additional configuration to pass through to the agent",
         default={},
         examples=[{"spicy_level": 0.8}],
     )
-    
+
+
 class ToolCall(TypedDict):
-    """Represents a request to call a tool."""
+    """Ajanın bir araç çağırma isteği."""
 
     name: str
-    """The name of the tool to be called."""
     args: dict[str, Any]
-    """The arguments to the tool call."""
     id: str | None
-    """An identifier associated with the tool call."""
     type: NotRequired[Literal["tool_call"]]
 
+
 class ChatMessage(BaseModel):
-    """ A message in a chat."""
+    """API'den dönen tek mesaj birimi — hem AI hem tool hem human mesajları bu yapıda geliyor."""
 
     type: Literal["human", "ai", "tool", "custom"] = Field(
         description="Role of the message.",
@@ -69,10 +75,12 @@ class ChatMessage(BaseModel):
         description="Custom message data.",
         default={},
     )
-    
-class StreamInput(UserInput):
-    """User input for streaming the agent's response."""
 
+
+class StreamInput(UserInput):
+    """Streaming istekleri için genişletilmiş input — stream_tokens ile token bazlı akışı açıp kapayabiliyoruz."""
+
+    # False yapılırsa sadece tam mesajlar gelir, token gelişi olmaz
     stream_tokens: bool = Field(
         description="Whether to stream LLM tokens to the client.",
         default=True,

@@ -1,5 +1,9 @@
 "use client";
 
+// app/chat/components/ChatComponent.tsx — sohbet arayüzünün ana bileşeni
+// Mesaj listesini, stream bağlantısını ve mesaj girişini burada yönetiyoruz.
+// Geçmiş mesajlar localStorage'a kaydediliyor — sayfa yenilensе bile kaybolmuyor.
+
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import MessageInput from "../components/MessageInput";
 import { useLayoutContext } from "../../layout-context";
@@ -8,6 +12,7 @@ import { useStreamChat } from "../hooks/useStreamChat";
 import MessageBubble from "../components/MessageBubble";
 import useChatActions from "../hooks/useChatActions";
 
+// özetleme için sabit prompt — kullanıcı butona bastığında bu gönderiliyor
 const SUMMARIZE_PROMPT =
   "Lütfen yüklü dokümanların içeriğini kapsamlı, yapılandırılmış ve madde madde özetle.";
 
@@ -19,13 +24,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ threadId }) => {
   const { agentId, currentThreadId, setCurrentThreadId } = useLayoutContext();
 
   // URL'den gelen threadId varsa bu zaten sidebar'a kayıtlı bir oturumdur
+  // sessionRegisteredRef ile aynı oturumu iki kez eklemeyi önlüyoruz
   const sessionRegisteredRef = useRef<boolean>(!!threadId);
 
   // threadId prop'u değişince (URL navigasyon): context'i senkronize et
   useEffect(() => {
     if (threadId) {
       setCurrentThreadId(threadId);
-      sessionRegisteredRef.current = true;  // Mevcut oturum → zaten kayıtlı
+      sessionRegisteredRef.current = true;
     }
   }, [threadId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -35,7 +41,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ threadId }) => {
 
   useEffect(() => scrollToBottom(), [messages, scrollToBottom]);
 
-  // Mesajları localStorage'a kaydet
+  // mesajları her güncellemede localStorage'a yaz
   useEffect(() => {
     if (messages.length > 0 && currentThreadId) {
       localStorage.setItem("chatMessages-" + currentThreadId, JSON.stringify(messages));
@@ -44,7 +50,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ threadId }) => {
 
   useChatActions({ setMessages, setInput, isStreaming, setIsStreaming });
 
-  // Thread değişince mesajları yükle (yeni thread → boş dizi)
+  // thread değişince o thread'e ait mesajları localStorage'dan yükle
   useEffect(() => {
     if (!currentThreadId) return;
     const stored = localStorage.getItem("chatMessages-" + currentThreadId);
@@ -84,14 +90,15 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ threadId }) => {
   const handleSummarize = async () => {
     if (isStreaming) return;
     dispatchNewSession(SUMMARIZE_PROMPT);
-    // Özetleme her zaman uzman ajanla yapılır; kullanıcının seçtiği ajandan bağımsız
+    // özetleme her zaman uzman ajanla yapılır — kullanıcının seçtiği ajandan bağımsız
     await handleStream(SUMMARIZE_PROMPT, "ozetleme-asistani");
   };
 
   return (
     <div className="flex flex-col h-full">
-      {/* Mesaj alanı */}
+      {/* mesaj alanı */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
+        {/* henüz mesaj yoksa karşılama ekranı göster */}
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center space-y-4 py-12">
             <div className="text-4xl">📄</div>
@@ -127,10 +134,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({ threadId }) => {
             }}
           />
         ))}
+        {/* scroll anchor */}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Giriş alanı */}
       <MessageInput
         input={input}
         setInput={setInput}

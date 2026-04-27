@@ -1,5 +1,9 @@
 "use client";
 
+// app/components/DocumentUpload.tsx — sol paneldeki dosya yükleme bileşeni
+// Yüklenen dosyayı POST /upload/document'e gönderiyor.
+// thread_id ile belgeyi aktif oturuma bağlıyor — başka oturumlar bu belgeyi göremez.
+
 import React, { useState } from "react";
 import { Upload, message, Typography, Progress } from "antd";
 import {
@@ -19,6 +23,7 @@ interface UploadedFile {
   status: "done" | "error";
 }
 
+// küçük yardımcı — dosya uzantısına göre ikon seç
 function FileIcon({ name }: { name: string }) {
   const ext = name.split(".").pop()?.toLowerCase();
   if (ext === "pdf") return <FilePdfOutlined className="text-red-400 text-sm" />;
@@ -29,6 +34,7 @@ function FileIcon({ name }: { name: string }) {
 const DocumentUpload: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  // uploadedFiles sadece bu session içinde tutuluyor — sayfa yenilenince sıfırlanır
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const { currentThreadId } = useLayoutContext();
 
@@ -38,7 +44,7 @@ const DocumentUpload: React.FC = () => {
 
     const formData = new FormData();
     formData.append("file", file);
-    // Belgeyi bu sohbet oturumuna özgü etiketle
+    // thread_id göndermezsen belgeler "global" olarak indekslenir — tüm oturumlar görür
     if (currentThreadId) formData.append("thread_id", currentThreadId);
 
     try {
@@ -60,6 +66,7 @@ const DocumentUpload: React.FC = () => {
         { filename: result.filename, chunks: result.chunks, status: "done" },
         ...prev,
       ]);
+      // chunk sayısını göster — kullanıcı "neden bu kadar uzun sürdü" sorusunu anlar
       message.success(`"${result.filename}" yüklendi · ${result.chunks} parça`);
     } catch (err: any) {
       message.error(err.message || "Dosya yüklenirken hata oluştu.");
@@ -75,10 +82,13 @@ const DocumentUpload: React.FC = () => {
         Doküman Yükle
       </Text>
 
+      {/* Ant Design Upload.Dragger — sürükle-bırak + tıklama destekli */}
       <Upload.Dragger
         accept=".pdf,.docx,.doc,.txt"
         showUploadList={false}
         beforeUpload={(file) => {
+          // beforeUpload false döndürünce Ant Design kendi upload mekanizmasını çalıştırmıyor
+          // biz kendi handleUpload'umuzu çağırıyoruz
           handleUpload(file);
           return false;
         }}
@@ -104,6 +114,7 @@ const DocumentUpload: React.FC = () => {
         />
       )}
 
+      {/* yüklenen dosyaların listesi — session boyunca göster */}
       {uploadedFiles.length > 0 && (
         <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto pr-1">
           {uploadedFiles.map((f, i) => (
@@ -115,6 +126,7 @@ const DocumentUpload: React.FC = () => {
               <span className="flex-1 text-xs text-gray-300 truncate" title={f.filename}>
                 {f.filename}
               </span>
+              {/* chunk sayısı = indekslenen parça sayısı */}
               <span className="text-xs text-green-400 shrink-0 flex items-center gap-1">
                 <CheckCircleOutlined />
                 {f.chunks}

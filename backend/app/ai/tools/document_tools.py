@@ -1,7 +1,7 @@
 """
-Doküman arama ve analiz araçları.
-Her araç, çağrıldığı sohbet oturumuna ait belgeleri filtreler (thread_id).
-Kaynak metadatası (dosya adı, sayfa numarası, benzerlik skoru) yanıtlara dahil edilir.
+app/ai/tools/document_tools.py — LangGraph ajanının kullandığı araçlar.
+search_documents: semantik arama + kaynak bilgisi
+list_documents: yüklü dosya listesi
 """
 
 import json
@@ -14,7 +14,8 @@ from core.config import settings
 
 
 def _get_thread_id(config: RunnableConfig | None) -> str:
-    """Agent config'inden thread_id'yi güvenle çıkarır."""
+    """Agent config'inden thread_id'yi güvenle çıkarır.
+    Config gelmezse boş string döner — filtre uygulanmaz, tüm belgeler aranır."""
     if not config:
         return ""
     return config.get("configurable", {}).get("thread_id", "")
@@ -27,12 +28,15 @@ async def search_documents(query: str, config: RunnableConfig) -> str:
     Sonuçları kaynak bilgisiyle (dosya adı, sayfa, benzerlik skoru) döndürür.
     """
     thread_id = _get_thread_id(config)
+    # thread_id varsa sadece o oturumun belgelerini ara
     filter_dict = {"thread_id": thread_id} if thread_id else None
 
     results = document_vector_store.similarity_search_with_relevance_scores(
         query, k=settings.RAG_K, filter=filter_dict
     )
-    # Düşük skorlu alakasız parçaları filtrele
+
+    # RAG_SCORE_THRESHOLD altındaki sonuçlar genellikle alakasız — filtreliyoruz
+    # bu değeri config'den ayarlayabilirsiniz, 0.3 çoğu durumda iyi çalışıyor
     results = [(doc, score) for doc, score in results if score >= settings.RAG_SCORE_THRESHOLD]
 
     if not results:
@@ -48,6 +52,7 @@ async def search_documents(query: str, config: RunnableConfig) -> str:
     for i, (doc, score) in enumerate(results):
         source = doc.metadata.get("source", "Bilinmeyen kaynak")
         page = doc.metadata.get("page")
+        # sayfa numarasını 0-index'ten 1-index'e çeviriyoruz — kullanıcı için daha anlamlı
         page_label = f" — Sayfa {int(page) + 1}" if page is not None else ""
         label = f"[Kaynak {i + 1}: {source}{page_label}]"
 
@@ -57,6 +62,7 @@ async def search_documents(query: str, config: RunnableConfig) -> str:
             "file": source,
             "page": int(page) + 1 if page is not None else None,
             "score": round(float(score), 3),
+            # önizleme için 120 karakter yeterli, newline'ları temizle
             "preview": doc.page_content[:120].replace("\n", " "),
         })
 
@@ -74,10 +80,13 @@ async def search_documents(query: str, config: RunnableConfig) -> str:
 async def list_documents(config: RunnableConfig) -> str:
     """
     Bu sohbet oturumuna yüklenmiş tüm benzersiz dosya isimlerini listeler.
+    Özetleme ajanı önce bunu çağırarak hangi dosyaların var olduğunu öğreniyor.
     """
     thread_id = _get_thread_id(config)
 
     try:
+        # _collection iç API — langchain-chroma bunu değiştirirse kırılabilir
+        # ama şimdilik başka yolu yok, LangChain'in standart API'sı bu sorguyu desteklemiyor
         collection = document_vector_store._collection
         if thread_id:
             results = collection.get(

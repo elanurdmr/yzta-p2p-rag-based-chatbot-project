@@ -1,3 +1,7 @@
+// app/chat/hooks/useStreamChat.ts — SSE stream bağlantısını yöneten hook
+// Backend'den gelen "data: {...}\n\n" satırlarını parse edip mesaj state'ini güncelliyor.
+// 5 farklı event tipi var: message, token, follow_up, error, end
+
 import { message as antMessage } from "antd";
 import { Message, Source, ToolCallItem } from "../types/chat.types";
 
@@ -9,7 +13,8 @@ interface UseStreamChatProps {
   setIsStreaming: (value: boolean) => void;
 }
 
-/** Tool sonucundan kaynak listesini parse eder. */
+/** Tool sonucundan kaynak listesini parse eder.
+ * Backend JSON döndürüyor ama string olarak geliyor — çift parse gerekiyor. */
 function extractSources(result: string): Source[] {
   try {
     const parsed = JSON.parse(result);
@@ -22,7 +27,8 @@ function extractSources(result: string): Source[] {
   return [];
 }
 
-/** Tool sonuç JSON'undan okunabilir metin çıkarır. */
+/** Tool sonuç JSON'undan okunabilir metin çıkarır.
+ * content veya message alanı varsa onu al, yoksa ham stringi döndür. */
 function extractContent(result: string): string {
   try {
     const parsed = JSON.parse(result);
@@ -44,12 +50,14 @@ export const useStreamChat = ({
   /**
    * SSE stream başlatır.
    * @param input Kullanıcı mesajı
-   * @param overrideAgentId Belirtilirse context agentId yerine bu kullanılır (ör. zorunlu özetleme ajanı)
+   * @param overrideAgentId Belirtilirse context agentId yerine bu kullanılır
+   *   (örn: özetleme butonuna basıldığında "ozetleme-asistani" zorla gönderilir)
    */
   const handleStream = async (input: string, overrideAgentId?: string) => {
     if (!input.trim() || isStreaming) return;
     setIsStreaming(true);
 
+    // kullanıcı ve AI mesajlarını hemen ekle — AI içeriği stream geldikçe dolacak
     const userMsg: Message = { id: `user_${Date.now()}`, type: "user", content: input };
     const aiMsg: Message = { id: `ai_${Date.now()}`, type: "ai", content: "", sources: [] };
     setMessages((prev) => [...prev, userMsg, aiMsg]);
@@ -77,6 +85,7 @@ export const useStreamChat = ({
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
+        // SSE satırları "\n" ile ayrılıyor, "data: " prefix'i var
         chunk.split("\n").forEach((line) => {
           if (!line.startsWith("data: ")) return;
           try {
@@ -90,7 +99,7 @@ export const useStreamChat = ({
               reader.cancel();
             }
           } catch {
-            // parse hatası yoksay
+            // parse hatası — bu satırı atla
           }
         });
       }
@@ -102,11 +111,12 @@ export const useStreamChat = ({
   };
 
   const handleMessageData = (content: any) => {
-    // AI mesajı — tool çağrısı varsa kayıt et
+    // AI tool çağrısı mesajı — araç çağrılarını son mesaja ekle
     if (content.type === "ai" && content.tool_calls?.length > 0) {
       setMessages((prev) => {
         const existingCalls: ToolCallItem[] = prev[prev.length - 1].toolCall?.calls ?? [];
         const existingIds = new Set(existingCalls.map((c) => c.id));
+        // aynı ID'li çağrıyı iki kez ekleme
         const newCalls: ToolCallItem[] = content.tool_calls
           .filter((tc: any) => !existingIds.has(tc.id))
           .map((tc: any) => ({ id: tc.id, name: tc.name, args: tc.args }));
@@ -119,7 +129,7 @@ export const useStreamChat = ({
       });
     }
 
-    // AI mesajı — final metin
+    // AI final metin yanıtı
     if (content.type === "ai" && content.content) {
       setMessages((prev) =>
         prev.map((msg, i) =>
@@ -128,7 +138,7 @@ export const useStreamChat = ({
       );
     }
 
-    // Tool sonucu — kaynak parse et ve ilgili çağrıya ata
+    // Tool sonucu — kaynakları parse edip hem çağrıya hem mesaja ata
     if (content.type === "tool") {
       const resultText = content.content ?? "";
       const sources = extractSources(resultText);
@@ -142,7 +152,7 @@ export const useStreamChat = ({
             : call
         );
 
-        // Toplam kaynaklarını mesaj düzeyine de birleştir
+        // tüm kaynak çağrılarından benzersiz kaynakları mesaj seviyesinde de tut
         const allSources: Source[] = updatedCalls.flatMap((c) => c.sources ?? []);
         const uniqueSources = allSources.filter(
           (s, idx, arr) => arr.findIndex((x) => x.file === s.file && x.page === s.page) === idx
@@ -158,6 +168,7 @@ export const useStreamChat = ({
   };
 
   const handleTokenData = (token: string) => {
+    // token bazlı streaming — her token gelince son mesaja ekle
     setMessages((prev) =>
       prev.map((msg, i) =>
         i === prev.length - 1 ? { ...msg, content: msg.content + token } : msg
@@ -175,7 +186,7 @@ export const useStreamChat = ({
   };
 
   const handleErrorData = (errorContent: string) => {
-    // 429 kota hatası için özel mesaj
+    // 429 için özel mesaj — kullanıcı quota neden doldu bilsin
     const is429 = errorContent.includes("429") || errorContent.includes("quota") || errorContent.includes("Quota");
     const userMessage = is429
       ? "⏳ API kotası doldu. Lütfen 1-2 dakika bekleyip tekrar deneyin."

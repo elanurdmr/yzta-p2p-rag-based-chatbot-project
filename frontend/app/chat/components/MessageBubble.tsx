@@ -1,3 +1,7 @@
+// app/chat/components/MessageBubble.tsx — tek bir mesajın görsel temsili
+// Kullanıcı mesajları sağda mavi balon, AI mesajları solda beyaz balon olarak gösteriliyor.
+// Tool call detayları daraltılabilir bir Collapse içinde saklı tutuluyor.
+
 import React from "react";
 import { Avatar, Collapse, Spin } from "antd";
 import { UserOutlined, RobotOutlined } from "@ant-design/icons";
@@ -15,12 +19,13 @@ interface MessageBubbleProps {
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreaming, onFollowUpSelect }) => {
   const { type, content, toolCall, sources, followUpQuestions } = message;
   const isUser = type === "user";
+  // content boş ama streaming devam ediyorsa "düşünüyor" animasyonu göster
   const isThinking = type === "ai" && isStreaming && content === "";
 
   return (
     <div className={`mb-5 flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`flex ${isUser ? "flex-row-reverse" : "flex-row"} items-start gap-3 max-w-[85%]`}>
-        {/* Avatar */}
+        {/* avatar rengi: kullanıcı = mavi, AI = indigo */}
         <Avatar
           size={36}
           className={`flex-shrink-0 ${isUser ? "bg-blue-500" : "bg-indigo-600"}`}
@@ -28,7 +33,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreaming, onF
           {isUser ? <UserOutlined /> : <RobotOutlined />}
         </Avatar>
 
-        {/* Balon */}
         <div className="flex flex-col gap-1 min-w-0 flex-1">
           <div
             className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
@@ -38,6 +42,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreaming, onF
             }`}
           >
             {isThinking ? (
+              // tool çağrısı bekleniyorsa farklı mesaj göster
               toolCall ? (
                 <div className="flex items-center gap-2 text-indigo-400">
                   <Spin size="small" />
@@ -51,7 +56,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreaming, onF
               )
             ) : (
               <>
-                {/* Araç çağrısı detayları (daraltılabilir) */}
+                {/* araç çağrısı detayları — varsayılan olarak kapalı, isteğe bağlı açılır */}
                 {toolCall?.calls && toolCall.calls.length > 0 && (
                   <Collapse
                     ghost
@@ -77,7 +82,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreaming, onF
                   />
                 )}
 
-                {/* Ana içerik */}
+                {/* kullanıcı mesajı düz metin, AI mesajı markdown */}
                 {isUser ? (
                   <p className="whitespace-pre-wrap">{content}</p>
                 ) : (
@@ -89,12 +94,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isStreaming, onF
             )}
           </div>
 
-          {/* Kaynak paneli (sadece AI mesajları için) */}
+          {/* kaynak paneli sadece AI mesajları altında göster */}
           {!isUser && sources && sources.length > 0 && (
             <SourcePanel sources={sources} />
           )}
 
-          {/* Akıllı takip soruları */}
+          {/* takip soruları: stream bitmeden gösterme, boşsa da gösterme */}
           {!isUser && !isStreaming && followUpQuestions && followUpQuestions.length > 0 && (
             <FollowUpChips
               questions={followUpQuestions}

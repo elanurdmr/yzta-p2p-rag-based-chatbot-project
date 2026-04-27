@@ -1,6 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+// app/layout.tsx — uygulamanın ana iskelet dosyası
+// Sider (sol panel), Header (üst bar) ve Content alanını yönetiyor.
+// Sohbet geçmişi localStorage'da tutuluyor — backend restart'tan etkilenmiyor.
+
+import React, { useState, useEffect } from "react";
 import { Layout } from "antd";
 import { BarsOutlined } from "@ant-design/icons";
 import "./globals.css";
@@ -12,8 +16,7 @@ import SiderComponent from "./components/SiderComponent";
 
 const { Header, Content } = Layout;
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-
+// Session: tek bir sohbet oturumunu temsil ediyor
 export interface Session {
   threadId: string;
   name: string;
@@ -29,7 +32,7 @@ export interface GroupedSessions {
 
 function getDateGroup(updatedAt: number): DateGroup {
   const diff = Date.now() - updatedAt;
-  const day = 86_400_000;
+  const day = 86_400_000; // ms cinsinden 1 gün
   if (diff < day) return "Bugün";
   if (diff < 2 * day) return "Dün";
   if (diff < 7 * day) return "Geçen Hafta";
@@ -42,6 +45,7 @@ export function groupSessionsByDate(sessions: Session[]): GroupedSessions[] {
   for (const s of sessions) {
     map.get(getDateGroup(s.lastUpdated))!.push(s);
   }
+  // boş grupları filtrele — "Geçen Hafta" hiç oturum yoksa gösterilmesin
   return order
     .filter((l) => map.get(l)!.length > 0)
     .map((l) => ({ label: l, sessions: map.get(l)! }));
@@ -52,47 +56,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [agentId, setAgentId] = useState("dokuman-asistani");
+  // mounted kontrolü: localStorage sadece client'ta var, SSR'da çalışmıyor
   const [mounted, setMounted] = useState(false);
-
-  // Backend'den conversation listesini çek
-  const fetchConversations = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/conversations`);
-      if (!res.ok) throw new Error("API hatası");
-      const data: Array<{ id: string; title: string; updated_at: number }> =
-        await res.json();
-      const mapped: Session[] = data.map((c) => ({
-        threadId: c.id,
-        name: c.title,
-        lastUpdated: c.updated_at,
-      }));
-      setSessions(mapped);
-      // LocalStorage'ı backend ile senkronize et (offline fallback için)
-      localStorage.setItem("chatSessions", JSON.stringify(mapped));
-    } catch {
-      // Backend erişilemiyorsa localStorage'a geri dön
-      try {
-        const stored = localStorage.getItem("chatSessions");
-        if (stored) setSessions(JSON.parse(stored));
-      } catch {
-        /* sessizce geç */
-      }
-    }
-  }, []);
 
   useEffect(() => {
     setMounted(true);
-    fetchConversations().then(() => {
-      // Aktif bir thread yoksa yeni UUID ata
-      setCurrentThreadId((prev) => prev ?? uuidv4());
-    });
+    // sayfa yüklenince localStorage'daki geçmiş oturumları yükle
+    try {
+      const stored = localStorage.getItem("chatSessions");
+      if (stored) setSessions(JSON.parse(stored));
+    } catch {
+      /* bozuk JSON gelirse sessizce geç */
+    }
+    // ilk yüklemede currentThreadId yoksa yeni bir UUID ata
+    setCurrentThreadId((prev) => prev ?? uuidv4());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Yeni oturum ekle event'ini dinle (ChatComponent'ten gelir)
+  // ChatComponent'ten gelen "add-session" custom event'ini dinle
+  // window event kullanmak zorundayız çünkü ChatComponent farklı bir ağaçta
   useEffect(() => {
     const onAddSession = (event: Event) => {
       const { threadId, msg } = (event as CustomEvent).detail;
-      // Optimistik güncelleme: hemen listeye ekle
       const newSession: Session = {
         threadId: threadId || uuidv4(),
         name: (msg as string).substring(0, 60).replace(/\n/g, " "),
@@ -100,28 +84,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       };
       setSessions((prev) => {
         const exists = prev.some((s) => s.threadId === newSession.threadId);
-        return exists ? prev : [newSession, ...prev];
+        const updated = exists ? prev : [newSession, ...prev];
+        // localStorage'ı her güncellemede senkronize tut
+        localStorage.setItem("chatSessions", JSON.stringify(updated));
+        return updated;
       });
       setCurrentThreadId(newSession.threadId);
       window.history.pushState({}, "", `/chat/${newSession.threadId}`);
-      // Kısa gecikme sonrası backend'den taze listeyi çek
-      setTimeout(fetchConversations, 1500);
     };
     window.addEventListener("add-session", onAddSession);
     return () => window.removeEventListener("add-session", onAddSession);
-  }, [fetchConversations]);
+  }, []);
 
-  const handleDeleteSession = async (delThreadId: string) => {
-    // Önce backend'den sil
-    try {
-      await fetch(`${API_BASE}/conversations/${delThreadId}`, {
-        method: "DELETE",
-      });
-    } catch {
-      /* çevrimdışıysa yerel silme devam eder */
-    }
-
-    // Yerel mesajları temizle
+  const handleDeleteSession = (delThreadId: string) => {
+    // önce o oturuma ait mesajları temizle, sonra session listesinden çıkar
     localStorage.removeItem("chatMessages-" + delThreadId);
 
     const newSessions = sessions.filter((s) => s.threadId !== delThreadId);
@@ -133,6 +109,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       setCurrentThreadId(next);
       window.history.pushState({}, "", `/chat/${next}`);
     } else {
+      // listedeki son oturum silindiyse yeni boş bir thread aç
       setCurrentThreadId(uuidv4());
       window.history.pushState({}, "", "/chat");
     }
@@ -144,6 +121,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   };
 
   const selectAgent = (value: string) => {
+    // ajan değişince yeni sohbet başlatıyoruz — eski thread yeni ajanla karışmasın
     setAgentId(value);
     handlerNewChat();
   };
@@ -175,6 +153,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <html lang="tr">
         <body className="min-h-screen">
           <Layout style={{ minHeight: "100vh" }}>
+            {/* mounted kontrolü olmadan localStorage'dan yüklenmiş sessions SSR'da undefined olabilir */}
             {mounted && (
               <SiderComponent
                 collapsed={collapsed}
@@ -198,6 +177,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <span className="ml-5 text-base font-bold text-indigo-600 hidden sm:block">
                   Kendi Dokümanların ile Sohbet Et
                 </span>
+                {/* ajan seçici header'ın sağ köşesinde */}
                 <div className="flex items-center ml-auto mr-4 gap-2">
                   <span className="text-sm text-gray-500 hidden md:block">Ajan:</span>
                   <AgentSelector value={agentId} onChange={selectAgent} />

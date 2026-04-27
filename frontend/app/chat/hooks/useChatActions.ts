@@ -1,3 +1,7 @@
+// app/chat/hooks/useChatActions.ts — sohbet düzeyindeki aksiyonlar
+// Şu an sadece "yeni sohbet" (mesajları temizle) var.
+// İleride "mesajı kopyala", "sohbeti dışa aktar" gibi şeyler buraya eklenebilir.
+
 import { SetStateAction } from 'react';
 import { Message } from '../types/chat.types';
 
@@ -12,6 +16,7 @@ const useChatActions = ({ setMessages, setInput, isStreaming, setIsStreaming }: 
   const handleNewChat = () => {
     setMessages([]);
     setInput("");
+    // stream devam ediyorsa durdur — yeni chat'e geçilince eski akış kesilmeli
     if (isStreaming) {
       setIsStreaming(false);
     }

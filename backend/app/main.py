@@ -1,6 +1,6 @@
 """
-FastAPI uygulama giriş noktası.
-'Kendi Dokümanların ile Sohbet Et' — Google Gemini + LangGraph + ChromaDB
+app/main.py — FastAPI uygulama girisi.
+Routerlar buraya baglanir, CORS ayarlanir, uygulama baslarken yapilmasi gerekenler burada.
 """
 
 import logging
@@ -10,10 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.chat_routes import chat_router
-from api.conversation_routes import conversation_router
 from api.upload_routes import upload_router
 from core.config import settings
-from db.database import init_db
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -22,26 +20,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# lifespan kullanmak zorundayız cünkü eski @app.on_event("startup") artık deprecated
+# chromadb istemcisi zaten modül yüklenince oluşuyor ama buraya log ekledim ki ne zaman hazır olduğunu göreyim
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 %s başlatılıyor...", settings.APP_NAME)
     logger.info("   LLM  : %s", settings.DEFAULT_MODEL)
     logger.info("   Embed: %s", settings.EMBEDDING_MODEL)
     logger.info("   Chroma: %s", settings.CHROMA_PATH)
-    logger.info("   DB   : %s", settings.DB_PATH)
-    await init_db()
-    logger.info("   SQLite veritabanı hazır.")
     yield
     logger.info("🛑 Uygulama kapatılıyor.")
 
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Google Gemini 1.5 Flash destekli doküman tabanlı RAG sohbet sistemi",
+    description="Google Gemini destekli doküman tabanlı RAG sohbet sistemi",
     version="2.0.0",
     lifespan=lifespan,
 )
 
+# geliştirme ortamında allow_origins=["*"] açık bırakıyoruz
+# production'a taşınırsa bunu kısıtlamak lazım ama şimdi challenge için önemli değil
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,6 +49,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# routerlar prefix'leriyle birlikte geliyor: /chat/... ve /upload/...
 app.include_router(chat_router)
-app.include_router(conversation_router)
 app.include_router(upload_router)

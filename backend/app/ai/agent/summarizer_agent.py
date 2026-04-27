@@ -1,5 +1,7 @@
 """
-Özetleme Ajanı — Yüklenen dokümanların tamamını veya belirli konularını özetler.
+app/ai/agent/summarizer_agent.py — Ozetleme için ayrı ajan.
+Dokuman ajanından farkı: bu ajan her zaman once list_documents çalıştırıyor
+sonra birden fazla search_documents çağrısı yaparak dokümanı derinlemesine tarıyor.
 """
 
 from typing import Literal
@@ -15,6 +17,8 @@ from ai.llm import get_model, settings
 from ai.tools.document_tools import search_documents, list_documents
 
 
+# emojili başlıklar markdown'da güzel görünüyor, bunu kasıtlı bıraktım
+# gerekirse kaldırılabilir ama kullanıcı deneyimi açısından iyi
 SUMMARIZER_INSTRUCTIONS = """Sen bir doküman özetleme asistanısın.
 
 Adımlar:
@@ -34,7 +38,7 @@ Kurallar: Türkçe yaz. Bilgi uydurma. Birden fazla dosya varsa her birini ayrı
 
 
 class SummarizerState(MessagesState):
-    """Özetleme ajanı durumu."""
+    """Özetleme ajanı durumu — document_agent ile aynı yapı."""
 
 
 tools = [search_documents, list_documents]
@@ -42,6 +46,7 @@ tools = [search_documents, list_documents]
 
 def _build_model(model: BaseChatModel) -> RunnableSerializable[SummarizerState, AIMessage]:
     bound = model.bind_tools(tools)
+    # özetleme prompt'u statik olduğu için lambda içinde datetime formatlamaya gerek yok
     preprocessor = RunnableLambda(
         lambda state: [SystemMessage(content=SUMMARIZER_INSTRUCTIONS)] + state["messages"],
         name="SummarizerStateModifier",
@@ -63,6 +68,7 @@ def _route(state: SummarizerState) -> Literal["tools", "done"]:
     return "tools" if last.tool_calls else "done"
 
 
+# document_agent ile aynı graf yapısı — ama sistem prompt farklı
 graph = StateGraph(SummarizerState)
 graph.add_node("model", _call_model)
 graph.add_node("tools", ToolNode(tools=tools))

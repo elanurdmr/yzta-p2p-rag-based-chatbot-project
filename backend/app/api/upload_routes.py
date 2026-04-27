@@ -1,6 +1,6 @@
 """
-Dosya yükleme ve ChromaDB'ye kaydetme endpoint'leri.
-Desteklenen formatlar: PDF (sayfa metadata'sı ile), DOCX, DOC, TXT
+app/api/upload_routes.py — Dosya yükleme ve ChromaDB indeksleme.
+PDF, DOCX, DOC ve TXT destekleniyor. Her format için ayrı parser var.
 """
 
 import asyncio
@@ -19,7 +19,8 @@ upload_router = APIRouter(prefix="/upload", tags=["upload"])
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
 
-# Recursive splitter — semantik bütünlüğü koruyan ayırıcılar sırasıyla denenir
+# separators sırası önemli — önce paragraf ayrımı, sonra satır, sonra cümle...
+# boş string en sona geliyor çünkü o son çare — karakter karakter keser
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1500,
     chunk_overlap=200,
@@ -27,22 +28,25 @@ text_splitter = RecursiveCharacterTextSplitter(
     length_function=len,
 )
 
-EMBED_BATCH_SIZE = 40   # free tier: dakikada ~100 istek; 40'lı grupla güvende
-EMBED_BATCH_DELAY = 5   # gruplar arası bekleme (saniye)
+# free tier dakikada ~100 embedding isteği kaldırıyor
+# 40'lık batch + 5 saniye bekleme ile güvende kalıyoruz
+EMBED_BATCH_SIZE = 40
+EMBED_BATCH_DELAY = 5
 
 
 # ---------------------------------------------------------------------------
-# Metin çıkarma — tüm fonksiyonlar Document listesi döndürür (metadata dahil)
+# Metin çıkarma — her format için ayrı fonksiyon, hepsi Document listesi döndürür
 # ---------------------------------------------------------------------------
 
 def _documents_from_pdf(filename: str, content: bytes) -> list[Document]:
-    """Her sayfayı ayrı Document olarak çıkarır — sayfa metadata'sı korunur."""
+    """Her sayfayı ayrı Document olarak çıkarır — sayfa numarası metadata'da korunuyor."""
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(content))
     documents: list[Document] = []
     for page_num, page in enumerate(reader.pages):
         text = page.extract_text() or ""
+        # boş sayfaları atla — genellikle görsel sayfalar oluyor
         if text.strip():
             documents.append(
                 Document(
@@ -54,7 +58,7 @@ def _documents_from_pdf(filename: str, content: bytes) -> list[Document]:
 
 
 def _documents_from_docx(filename: str, content: bytes) -> list[Document]:
-    """DOCX paragraflarını tek Document olarak döndürür."""
+    """DOCX — python-docx ile paragraf paragraf çıkar, tek Document'a birleştir."""
     from docx import Document as DocxDocument
 
     doc = DocxDocument(io.BytesIO(content))
@@ -63,7 +67,8 @@ def _documents_from_docx(filename: str, content: bytes) -> list[Document]:
 
 
 def _documents_from_doc(filename: str, content: bytes) -> list[Document]:
-    """Eski Word (.doc) binary formatını mammoth ile çıkarır."""
+    """Eski .doc formatı — mammoth ile ham metin çıkarıyoruz.
+    Bazen tablolar ve grafikler kaybolabiliyor ama metin genellikle tam geliyor."""
     import mammoth
 
     with io.BytesIO(content) as f:
@@ -79,12 +84,13 @@ def _documents_from_doc(filename: str, content: bytes) -> list[Document]:
 
 
 def _documents_from_txt(filename: str, content: bytes) -> list[Document]:
-    """UTF-8 metin dosyasını Document'a çevirir."""
+    """TXT — UTF-8 decode, errors='ignore' ile bozuk karakterleri atla."""
     text = content.decode("utf-8", errors="ignore")
     return [Document(page_content=text, metadata={"source": filename})]
 
 
 def _extract_documents(filename: str, content: bytes) -> list[Document]:
+    """Uzantıya göre doğru parser'ı seç ve çalıştır."""
     ext = Path(filename).suffix.lower()
     dispatch = {
         ".pdf": _documents_from_pdf,
@@ -107,9 +113,10 @@ def _extract_documents(filename: str, content: bytes) -> list[Document]:
 async def _add_batch_with_retry(
     vector_store, batch: list[Document], max_retries: int = 4
 ) -> None:
-    """429 rate-limit hatası gelirse üstel geri-çekilme ile tekrar dener."""
+    """429 gelirse üstel geri-çekilme ile tekrar dener.
+    İlk bekleme 65 saniye — quota bir dakikada sıfırlanıyor."""
     loop = asyncio.get_running_loop()
-    wait = 65  # ilk bekleme: dakika kotası sıfırlanana kadar bekle
+    wait = 65
     for attempt in range(max_retries):
         try:
             await loop.run_in_executor(None, vector_store.add_documents, batch)
@@ -123,7 +130,7 @@ async def _add_batch_with_retry(
                         wait, attempt + 1, max_retries,
                     )
                     await asyncio.sleep(wait)
-                    wait = min(wait * 2, 300)
+                    wait = min(wait * 2, 300)  # maksimum 5 dakika bekle
                 else:
                     raise
             else:
@@ -131,25 +138,25 @@ async def _add_batch_with_retry(
 
 
 async def _index_document(filename: str, content: bytes, thread_id: str = "") -> int:
-    """Dokümanı parçalara ayırıp ChromaDB'ye asenkron olarak kaydeder.
+    """Asıl indeksleme mantığı burada.
+    Dosyayı parse et, chunk'lara böl, thread_id ekle, ChromaDB'ye yaz.
 
-    - PDF için sayfa bazlı Document'lar oluşturulur (sayfa metadata'sı korunur).
-    - split_documents() kullanılarak orijinal metadata tüm parçalara taşınır.
-    - thread_id ile her oturumun belgeleri birbirinden izole edilir.
-    - Rate-limit koruması için gruplar halinde, retry mantığıyla gönderilir.
+    thread_id neden önemli: her kullanıcının kendi oturumuna yüklediği belgeler
+    başka oturumların sorgularına karışmamalı. metadata filtresiyle izole ediyoruz.
     """
     from ai.rag.chromaClient import document_vector_store
 
     loop = asyncio.get_running_loop()
+    # parse işlemi blocking olduğu için executor'a taşıyoruz
     page_docs = await loop.run_in_executor(None, _extract_documents, filename, content)
 
     if not page_docs or not any(d.page_content.strip() for d in page_docs):
         raise ValueError("Dosyadan metin çıkarılamadı veya dosya boş.")
 
-    # split_documents: orijinal metadata'yı (source, page) tüm chunk'lara taşır
+    # split_documents kullanmak önemli — split_text değil
+    # çünkü split_documents orijinal metadata'yı (source, page) tüm chunk'lara taşıyor
     chunks = text_splitter.split_documents(page_docs)
 
-    # Her chunk'a thread_id ekle — oturum bazlı izolasyon için
     if thread_id:
         for chunk in chunks:
             chunk.metadata["thread_id"] = thread_id

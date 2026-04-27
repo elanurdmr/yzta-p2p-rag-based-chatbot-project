@@ -1,3 +1,7 @@
+// app/chat/components/MessageInput.tsx — mesaj giriş alanı ve aksiyon butonları
+// Enter gönderir, Ctrl+Enter yeni satır ekler (textarea'da doğal davranış böyle olmak zorunda).
+// Özetleme butonu her zaman aktif — sadece streaming sırasında disabled oluyor.
+
 import React from "react";
 import { Button, Input, Tooltip } from "antd";
 import { SendOutlined, FileTextOutlined } from "@ant-design/icons";
@@ -29,6 +33,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               e.preventDefault();
               if (!isStreaming && input.trim()) handleSend();
             }
+            // Ctrl+Enter ile newline ekle — çok satırlı soru sormak için
             if (e.key === "Enter" && e.ctrlKey) {
               e.preventDefault();
               setInput(input + "\n");
@@ -40,7 +45,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
         />
 
         <div className="flex flex-col gap-1.5">
-          {/* Gönder */}
           <Tooltip title="Gönder">
             <Button
               type="primary"
@@ -52,7 +56,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             />
           </Tooltip>
 
-          {/* Özetle */}
+          {/* özetleme butonu — mesaj alanını doldurmadan direkt özetleme başlatır */}
           <Tooltip title="Yüklü dokümanları özetle">
             <Button
               icon={<FileTextOutlined />}

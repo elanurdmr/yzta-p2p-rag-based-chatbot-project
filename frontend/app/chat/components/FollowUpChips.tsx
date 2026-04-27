@@ -1,5 +1,9 @@
 "use client";
 
+// app/chat/components/FollowUpChips.tsx — AI yanıtı sonrası çıkan takip sorusu butonları
+// Backend'den gelen questions dizisini tıklanabilir chip'lere dönüştürür.
+// disabled=true olunca (streaming devam ederken) butonlar gri ve pasif.
+
 import React from "react";
 import { SparklesIcon } from "./SparklesIcon";
 
