@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from ai.rag.chromaClient import document_vector_store
+from core.config import settings
 
 
 def _get_thread_id(config: RunnableConfig | None) -> str:
@@ -29,8 +30,10 @@ async def search_documents(query: str, config: RunnableConfig) -> str:
     filter_dict = {"thread_id": thread_id} if thread_id else None
 
     results = document_vector_store.similarity_search_with_relevance_scores(
-        query, k=8, filter=filter_dict
+        query, k=settings.RAG_K, filter=filter_dict
     )
+    # Düşük skorlu alakasız parçaları filtrele
+    results = [(doc, score) for doc, score in results if score >= settings.RAG_SCORE_THRESHOLD]
 
     if not results:
         msg = (

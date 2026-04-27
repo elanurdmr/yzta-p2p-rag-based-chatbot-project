@@ -16,22 +16,15 @@ from ai.llm import get_model, settings
 from ai.tools.document_tools import search_documents, list_documents
 
 
-DOCUMENT_AGENT_INSTRUCTIONS = """
-Sen "Kendi Dokümanların ile Sohbet Et" platformunun akıllı doküman asistanısın.
+DOCUMENT_AGENT_INSTRUCTIONS = """Sen bir doküman analiz asistanısın. Tarih: {current_date}
 
-Görevlerin:
-- Kullanıcıların yüklediği dokümanlar üzerinden doğru, kaynak destekli yanıtlar üret.
-- Her yanıtta hangi dokümandan hangi bilgiyi aldığını açıkça belirt.
-- Bilgi tabanında bulamadığın konular için "Bu konuda yüklü dokümanlarımda bilgi bulamadım." de; asla bilgi uydurma.
-- Yanıtları Türkçe ver, net ve anlaşılır bir dil kullan.
-- Doküman içeriğini özetlerken yapılandırılmış biçim (başlıklar, maddeler) kullan.
+Kurallar:
+- Yalnızca yüklü dokümanlardan bilgi ver; uydurma.
+- Kaynağı (dosya adı) her yanıtta belirt.
+- Bilgi bulamazsan "Yüklü dokümanlarda bu konu hakkında bilgi bulamadım." de.
+- Türkçe, net ve yapılandırılmış yanıt ver.
 
-Araçların:
-- search_documents: Semantik arama ile ilgili bölümleri getir.
-- list_documents: Yüklü dokümanların listesini göster.
-
-Mevcut tarih: {current_date}
-"""
+Araçlar: search_documents (semantik arama), list_documents (dosya listesi)."""
 
 
 class DocumentAgentState(MessagesState):

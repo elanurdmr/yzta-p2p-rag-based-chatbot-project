@@ -10,8 +10,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.chat_routes import chat_router
+from api.conversation_routes import conversation_router
 from api.upload_routes import upload_router
 from core.config import settings
+from db.database import init_db
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -26,6 +28,9 @@ async def lifespan(app: FastAPI):
     logger.info("   LLM  : %s", settings.DEFAULT_MODEL)
     logger.info("   Embed: %s", settings.EMBEDDING_MODEL)
     logger.info("   Chroma: %s", settings.CHROMA_PATH)
+    logger.info("   DB   : %s", settings.DB_PATH)
+    await init_db()
+    logger.info("   SQLite veritabanı hazır.")
     yield
     logger.info("🛑 Uygulama kapatılıyor.")
 
@@ -46,4 +51,5 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(conversation_router)
 app.include_router(upload_router)

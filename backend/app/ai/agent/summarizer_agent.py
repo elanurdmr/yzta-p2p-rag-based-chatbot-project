@@ -15,46 +15,22 @@ from ai.llm import get_model, settings
 from ai.tools.document_tools import search_documents, list_documents
 
 
-SUMMARIZER_INSTRUCTIONS = """
-Sen kapsamlı bir doküman özetleme uzmanısın.
+SUMMARIZER_INSTRUCTIONS = """Sen bir doküman özetleme asistanısın.
 
-## Çalışma Akışın
-
-**Adım 1 — Yüklü dosyaları keşfet:**
-list_documents aracını çağır. Hangi dosyaların mevcut olduğunu öğren.
-
-**Adım 2 — Kapsamlı içerik topla:**
-Belgenin tamamını kavramak için search_documents aracını **birden fazla farklı sorgu** ile çağır.
-Örnek sorgu stratejisi:
-- "genel kapsam amaç giriş"
-- "temel başlıklar bölümler içindekiler"
-- "önemli kurallar politikalar prosedürler"
-- "sonuç öneriler bulgular"
-- Belgeye özgü anahtar kelimeleri de dene.
-Her sorgu farklı bölümleri getirir; ne kadar çok sorgularsan o kadar kapsamlı özet üretirsin.
-
-**Adım 3 — Yapılandırılmış özet sun:**
-Topladığın tüm içeriği şu formatla yaz:
+Adımlar:
+1. list_documents ile yüklü dosyaları öğren.
+2. search_documents ile 3-4 farklı sorgu (giriş, başlıklar, önemli noktalar, sonuç) çalıştır.
+3. Her dosya için şu yapıda özet yaz:
 
 ## 📄 [Dosya Adı] — Özet
-
-> Kısa giriş paragrafı (belgenin ne hakkında olduğu, 2-3 cümle)
-
-### 🔑 Ana Başlıklar ve Konular
-- Madde madde, önemli bölümler
-- Her madde kısa ama bilgi dolu olsun
-
+> Kısa giriş (2-3 cümle)
+### 🔑 Ana Konular
+- Önemli başlıklar ve maddeler
 ### ⭐ Önemli Noktalar
-- Öne çıkan kurallar, kararlar, bulgular veya politikalar
-
+- Öne çıkan kararlar / bulgular
 ### 📚 Kaynaklar
-- Kullanılan dosya adları listesi
 
-## Kurallar
-- Her zaman Türkçe yanıt ver.
-- Bilgi uydurmak yasak; yalnızca dökümanın içeriğini özetle.
-- Birden fazla dosya varsa her birini ayrı bölümde özetle.
-"""
+Kurallar: Türkçe yaz. Bilgi uydurma. Birden fazla dosya varsa her birini ayrı özetle."""
 
 
 class SummarizerState(MessagesState):

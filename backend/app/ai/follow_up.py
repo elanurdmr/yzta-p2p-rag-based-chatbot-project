@@ -1,6 +1,6 @@
 """
 Takip sorusu üreteci.
-Verilen AI yanıtı ve kaynak içeriklere göre 3 adet akıllı takip sorusu üretir.
+Verilen AI yanıtına göre 3 adet akıllı takip sorusu üretir.
 """
 
 import json
@@ -13,23 +13,36 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_FOLLOW_UP_PROMPT = """
-Bir doküman analiz asistanısın. Kullanıcı bir soruyu sormuş, sen de cevaplamışsın.
-Şimdi kullanıcının dökümana daha derinlemesine dalmasını sağlayacak 3 adet akıllı takip sorusu üreteceksin.
-
-Kurallar:
-- Sorular dökümanın gerçek içeriğine odaklı olmalı
-- Her soru bir öncekinden farklı bir perspektif sunmalı (detay, karşılaştırma, uygulama gibi)
-- Sorular kısa ve net olmalı (maksimum 12 kelime)
-- Türkçe yaz
-- Yalnızca JSON dizisi döndür, başka hiçbir şey yazma
+_FOLLOW_UP_PROMPT = """Aşağıdaki soru-cevap çiftine göre, kullanıcının dokümana daha derinlemesine dalmasını sağlayacak 3 kısa takip sorusu üret.
 
 Kullanıcı sorusu: {user_question}
 AI yanıtı: {ai_answer}
 
-Sadece şu formatta döndür:
-["Soru 1?", "Soru 2?", "Soru 3?"]
-"""
+Kurallar:
+- Her soru maksimum 12 kelime, Türkçe
+- Farklı açılar (detay, karşılaştırma, uygulama)
+- YALNIZCA aşağıdaki formatta JSON dizisi döndür, başka hiçbir şey yazma:
+["Soru 1?", "Soru 2?", "Soru 3?"]"""
+
+
+def _parse_questions(text: str) -> list[str]:
+    """Model çıktısından JSON dizi içindeki soruları güvenle çıkarır."""
+    # Markdown code block varsa temizle
+    text = re.sub(r"```[a-z]*\n?", "", text).strip()
+
+    # İlk [ ... ] bloğunu bul (greedy — tüm diziyi yakala)
+    match = re.search(r"\[.*\]", text, re.DOTALL)
+    if not match:
+        return []
+
+    try:
+        questions = json.loads(match.group())
+        if isinstance(questions, list):
+            return [str(q).strip() for q in questions if str(q).strip()][:3]
+    except json.JSONDecodeError:
+        pass
+
+    return []
 
 
 async def generate_follow_up_questions(
@@ -47,18 +60,19 @@ async def generate_follow_up_questions(
             temperature=0.7,
         )
         prompt = _FOLLOW_UP_PROMPT.format(
-            user_question=user_question[:500],
-            ai_answer=ai_answer[:1500],
+            user_question=user_question[:400],
+            ai_answer=ai_answer[:1200],
         )
         response = await llm.ainvoke(prompt)
-        text = response.content.strip()
+        text = (response.content or "").strip()
+        logger.debug("Follow-up ham yanıt: %s", text[:200])
 
-        # JSON dizisini parse et
-        match = re.search(r'\[.*?\]', text, re.DOTALL)
-        if match:
-            questions = json.loads(match.group())
-            return [str(q).strip() for q in questions if q][:3]
+        questions = _parse_questions(text)
+        if questions:
+            return questions
+
+        logger.warning("Follow-up: JSON parse başarısız. Ham yanıt: %s", text[:300])
     except Exception as e:
-        logger.warning(f"Takip sorusu üretilemedi: {e}")
+        logger.warning("Takip sorusu üretilemedi: %s", e)
 
     return []

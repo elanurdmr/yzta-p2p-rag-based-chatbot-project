@@ -35,5 +35,15 @@ class Settings(BaseSettings):
 
     CHROMA_PATH: str = "resource/chroma_db"
 
+    # SQLite veritabanı — sohbet geçmişi için
+    DB_PATH: str = "resource/conversations.db"
+
+    # Takip soruları / basit özetler için hızlı ve ucuz model
+    FAST_MODEL: str = "gemini-1.5-flash"
+
+    # RAG'da döküman chunk sayısı — daha az token, daha odaklı yanıt
+    RAG_K: int = 4
+    RAG_SCORE_THRESHOLD: float = 0.3
+
 
 settings = Settings()

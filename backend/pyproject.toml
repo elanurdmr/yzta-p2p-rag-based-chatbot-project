@@ -5,6 +5,7 @@ description = "Kendi Dokümanların ile Sohbet Et — Google Gemini destekli RAG
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aiosqlite>=0.20.0",
     "chromadb>=0.6.3",
     "fastapi[standard]>=0.115.12",
     "langchain>=0.3.25",

@@ -20,6 +20,7 @@ from ai.agent.agents import DEFAULT_AGENT, get_agent
 from ai.follow_up import generate_follow_up_questions
 from api.schema.chatSchema import ChatMessage, StreamInput, UserInput
 from core.config import settings
+from db.conversation_service import upsert_conversation
 from utils.chat_utils import (
     convert_message_content_to_string,
     langchain_to_chat_message,
@@ -119,7 +120,14 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
     agent = get_agent(user_input.agent_id)
     kwargs, run_id = await _build_input(user_input, agent)
 
-    # Son AI yanıtını takip et (takip soruları için)
+    # Conversation'ı SQLite'a kaydet / updated_at güncelle
+    thread_id = user_input.thread_id or str(run_id)
+    try:
+        await upsert_conversation(thread_id, user_input.message)
+    except Exception as e:
+        logger.warning("Conversation kaydedilemedi: %s", e)
+
+    # Son AI yanıtını takip et (takip soruları için) — yalnızca updates modundan alınır
     last_ai_content: str = ""
 
     try:
@@ -155,8 +163,8 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
                 if chat_message.type == "human" and chat_message.content == user_input.message:
                     continue
 
-                # Son AI mesajını kaydet
-                if chat_message.type == "ai" and chat_message.content:
+                # Son anlamlı AI yanıtını kaydet (takip soruları için)
+                if chat_message.type == "ai" and chat_message.content and not chat_message.tool_calls:
                     last_ai_content = chat_message.content
 
                 yield f"data: {json.dumps({'type': 'message', 'content': chat_message.model_dump()})}\n\n"
@@ -171,8 +179,6 @@ async def _message_generator(user_input: StreamInput) -> AsyncGenerator[str, Non
                     continue
                 content = remove_tool_calls(msg.content)
                 if content:
-                    # Streaming token'larını da biriktir
-                    last_ai_content += convert_message_content_to_string(content)
                     yield f"data: {json.dumps({'type': 'token', 'content': convert_message_content_to_string(content)})}\n\n"
 
     except GeneratorExit:

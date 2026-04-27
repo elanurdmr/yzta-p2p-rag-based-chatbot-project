@@ -3,14 +3,15 @@ import { Layout, Menu } from "antd";
 import NewChatButton from "./NewChatButton";
 import DocumentUpload from "./DocumentUpload";
 import { useLayoutContext } from "../layout-context";
+import type { Session } from "../layout";
 
 interface SiderComponentProps {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
-  sessions: Array<{ threadId: string; name: string; lastUpdated: number }>;
+  sessions: Session[];
   handleDeleteSession: (threadId: string) => void;
   handlerNewChat: () => void;
-  items: Array<{ key: string; label: React.ReactNode }>;
+  items: Array<{ key: string; label: React.ReactNode; type?: "group" }>;
   onSelectSession: (key: string) => void;
 }
 
@@ -26,14 +27,16 @@ const SiderComponent: React.FC<SiderComponentProps> = ({
   onSelectSession,
 }) => {
   const { currentThreadId } = useLayoutContext();
+  const hasHistory = sessions.length > 0;
 
   return (
     <Sider
       collapsible
       collapsed={collapsed}
       onCollapse={onCollapse}
-      width={220}
+      width={240}
       className="flex flex-col"
+      style={{ overflow: "hidden" }}
     >
       {/* Logo */}
       {!collapsed && (
@@ -51,22 +54,34 @@ const SiderComponent: React.FC<SiderComponentProps> = ({
       {/* Dosya yükleme */}
       {!collapsed && <DocumentUpload />}
 
-      {/* Oturum listesi */}
-      {!collapsed && items.length > 0 && (
-        <div className="px-3 pb-1">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-            Geçmiş
+      {/* Sohbet geçmişi — gruplandırılmış */}
+      {!collapsed && hasHistory && (
+        <div className="px-3 pt-2 pb-1">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest">
+            Sohbet Geçmişi
           </p>
         </div>
       )}
-      <Menu
-        theme="dark"
-        className="flex-1 overflow-y-auto max-h-[calc(100vh-360px)]"
-        selectedKeys={currentThreadId ? [currentThreadId] : []}
-        mode="inline"
-        items={items}
-        onSelect={({ key }) => onSelectSession(key)}
-      />
+
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          maxHeight: "calc(100vh - 320px)",
+          scrollbarWidth: "thin",
+        }}
+      >
+        <Menu
+          theme="dark"
+          selectedKeys={currentThreadId ? [currentThreadId] : []}
+          mode="inline"
+          items={collapsed ? [] : items}
+          onSelect={({ key }) => {
+            if (!key.startsWith("group-")) onSelectSession(key);
+          }}
+          style={{ background: "transparent", border: "none" }}
+        />
+      </div>
     </Sider>
   );
 };

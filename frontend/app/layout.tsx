@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Layout } from "antd";
 import { BarsOutlined } from "@ant-design/icons";
 import "./globals.css";
@@ -12,83 +12,133 @@ import SiderComponent from "./components/SiderComponent";
 
 const { Header, Content } = Layout;
 
-interface Session {
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+export interface Session {
   threadId: string;
   name: string;
   lastUpdated: number;
 }
 
+export type DateGroup = "Bugün" | "Dün" | "Geçen Hafta" | "Daha Önce";
+
+export interface GroupedSessions {
+  label: DateGroup;
+  sessions: Session[];
+}
+
+function getDateGroup(updatedAt: number): DateGroup {
+  const diff = Date.now() - updatedAt;
+  const day = 86_400_000;
+  if (diff < day) return "Bugün";
+  if (diff < 2 * day) return "Dün";
+  if (diff < 7 * day) return "Geçen Hafta";
+  return "Daha Önce";
+}
+
+export function groupSessionsByDate(sessions: Session[]): GroupedSessions[] {
+  const order: DateGroup[] = ["Bugün", "Dün", "Geçen Hafta", "Daha Önce"];
+  const map = new Map<DateGroup, Session[]>(order.map((l) => [l, []]));
+  for (const s of sessions) {
+    map.get(getDateGroup(s.lastUpdated))!.push(s);
+  }
+  return order
+    .filter((l) => map.get(l)!.length > 0)
+    .map((l) => ({ label: l, sessions: map.get(l)! }));
+}
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  // Hydration güvenli başlangıç: SSR'de boş dizi, tarayıcıda localStorage'dan yükle
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [agentId, setAgentId] = useState("dokuman-asistani");
   const [mounted, setMounted] = useState(false);
 
-  // Tarayıcıya mount olduktan sonra localStorage'ı oku (Hydration hatası önlenir)
-  // İlk açılışta boş oturum bile olsa bir thread_id ön-atanır → belge yüklemeleri
-  // doğru etiketlenir.
-  useEffect(() => {
-    setMounted(true);
+  // Backend'den conversation listesini çek
+  const fetchConversations = useCallback(async () => {
     try {
-      const stored = localStorage.getItem("chatSessions");
-      if (stored) {
-        setSessions(JSON.parse(stored));
-      } else {
-        // Hiç oturum yok → temiz başlangıç için thread_id ön-ata
-        setCurrentThreadId(uuidv4());
-      }
+      const res = await fetch(`${API_BASE}/conversations`);
+      if (!res.ok) throw new Error("API hatası");
+      const data: Array<{ id: string; title: string; updated_at: number }> =
+        await res.json();
+      const mapped: Session[] = data.map((c) => ({
+        threadId: c.id,
+        name: c.title,
+        lastUpdated: c.updated_at,
+      }));
+      setSessions(mapped);
+      // LocalStorage'ı backend ile senkronize et (offline fallback için)
+      localStorage.setItem("chatSessions", JSON.stringify(mapped));
     } catch {
-      setCurrentThreadId(uuidv4());
+      // Backend erişilemiyorsa localStorage'a geri dön
+      try {
+        const stored = localStorage.getItem("chatSessions");
+        if (stored) setSessions(JSON.parse(stored));
+      } catch {
+        /* sessizce geç */
+      }
     }
   }, []);
 
-  // Yeni oturum ekle event'ini dinle
   useEffect(() => {
-    const addSession = (event: Event) => {
+    setMounted(true);
+    fetchConversations().then(() => {
+      // Aktif bir thread yoksa yeni UUID ata
+      setCurrentThreadId((prev) => prev ?? uuidv4());
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Yeni oturum ekle event'ini dinle (ChatComponent'ten gelir)
+  useEffect(() => {
+    const onAddSession = (event: Event) => {
       const { threadId, msg } = (event as CustomEvent).detail;
-      handleAddSession(threadId, msg);
+      // Optimistik güncelleme: hemen listeye ekle
+      const newSession: Session = {
+        threadId: threadId || uuidv4(),
+        name: (msg as string).substring(0, 60).replace(/\n/g, " "),
+        lastUpdated: Date.now(),
+      };
+      setSessions((prev) => {
+        const exists = prev.some((s) => s.threadId === newSession.threadId);
+        return exists ? prev : [newSession, ...prev];
+      });
+      setCurrentThreadId(newSession.threadId);
+      window.history.pushState({}, "", `/chat/${newSession.threadId}`);
+      // Kısa gecikme sonrası backend'den taze listeyi çek
+      setTimeout(fetchConversations, 1500);
     };
-    window.addEventListener("add-session", addSession);
-    return () => window.removeEventListener("add-session", addSession);
-  }, [sessions]);  // sessions değişince listener'ı güncelle
+    window.addEventListener("add-session", onAddSession);
+    return () => window.removeEventListener("add-session", onAddSession);
+  }, [fetchConversations]);
 
-  const handleAddSession = (newThreadId: string, startMsg: string) => {
-    const tid = newThreadId || uuidv4();
-    const msg = startMsg || `Sohbet ${new Date().toLocaleTimeString("tr-TR")}`;
-    const newSession: Session = {
-      threadId: tid,
-      name: msg.substring(0, 28),
-      lastUpdated: Date.now(),
-    };
+  const handleDeleteSession = async (delThreadId: string) => {
+    // Önce backend'den sil
+    try {
+      await fetch(`${API_BASE}/conversations/${delThreadId}`, {
+        method: "DELETE",
+      });
+    } catch {
+      /* çevrimdışıysa yerel silme devam eder */
+    }
 
-    const updated = [...sessions, newSession];
-    setSessions(updated);
-    setCurrentThreadId(tid);
-    localStorage.setItem("chatSessions", JSON.stringify(updated));
-    window.history.pushState({}, "", `/chat/${tid}`);
-  };
+    // Yerel mesajları temizle
+    localStorage.removeItem("chatMessages-" + delThreadId);
 
-  const handleDeleteSession = (delThreadId: string) => {
     const newSessions = sessions.filter((s) => s.threadId !== delThreadId);
     setSessions(newSessions);
     localStorage.setItem("chatSessions", JSON.stringify(newSessions));
-    localStorage.removeItem("chatMessages-" + delThreadId);
 
     if (newSessions.length > 0) {
-      const last = [...newSessions].reverse()[0].threadId;
-      setCurrentThreadId(last);
-      window.history.pushState({}, "", `/chat/${last}`);
+      const next = newSessions[0].threadId;
+      setCurrentThreadId(next);
+      window.history.pushState({}, "", `/chat/${next}`);
     } else {
-      // Oturum kalmadı → yeni sohbet için UUID ön-ata
       setCurrentThreadId(uuidv4());
       window.history.pushState({}, "", "/chat");
     }
   };
 
   const handlerNewChat = () => {
-    // Yeni sohbet için hemen UUID ata — kullanıcı belge yüklemeden önce ID'si hazır olsun
     setCurrentThreadId(uuidv4());
     window.history.pushState({}, "", "/chat");
   };
@@ -98,12 +148,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     handlerNewChat();
   };
 
-  const items = [...sessions].reverse().map((session) => ({
-    key: session.threadId,
-    label: (
-      <SessionListItem session={session} onDelete={handleDeleteSession} />
-    ),
-  }));
+  const grouped = groupSessionsByDate(sessions);
+
+  const items = grouped.flatMap(({ label, sessions: groupSessions }) => [
+    {
+      key: `group-${label}`,
+      type: "group" as const,
+      label: (
+        <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+          {label}
+        </span>
+      ),
+    },
+    ...groupSessions.map((session) => ({
+      key: session.threadId,
+      label: (
+        <SessionListItem session={session} onDelete={handleDeleteSession} />
+      ),
+    })),
+  ]);
 
   return (
     <LayoutContext.Provider
